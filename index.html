@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rekap Pesanan Percetakan</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-slate-100 font-sans text-slate-800 pb-10">
+
+    <!-- Header / Navbar -->
+    <header class="bg-indigo-700 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <i class="fa-solid fa-print"></i> Rekap Pesanan Percetakan
+            </h1>
+            <span id="sync-status" class="text-xs bg-indigo-800 px-3 py-1 rounded-full text-indigo-200 flex items-center gap-1">
+                <i class="fa-solid fa-sync fa-spin"></i> Menghubungkan...
+            </span>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+
+        <!-- Ringkasan Statistik -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white p-4 rounded-lg shadow border-l-4 border-indigo-500">
+                <p class="text-xs text-slate-500 font-semibold uppercase">Total Pesanan</p>
+                <h2 id="stat-total-order" class="text-2xl font-bold mt-1">0</h2>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border-l-4 border-emerald-500">
+                <p class="text-xs text-slate-500 font-semibold uppercase">Total Lunas</p>
+                <h2 id="stat-lunas" class="text-2xl font-bold mt-1 text-emerald-600">Rp 0</h2>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border-l-4 border-amber-500">
+                <p class="text-xs text-slate-500 font-semibold uppercase">Belum Lunas (Piutang)</p>
+                <h2 id="stat-belum-lunas" class="text-2xl font-bold mt-1 text-amber-600">Rp 0</h2>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Form Input & Kalkulator -->
+            <div class="lg:col-span-1 bg-white p-5 rounded-lg shadow">
+                <h2 class="text-base font-bold mb-4 flex items-center gap-2 text-indigo-700 border-b pb-2">
+                    <i class="fa-solid fa-calculator"></i> Input Pesanan Baru
+                </h2>
+
+                <form id="order-form" class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Hari / Tanggal</label>
+                        <input type="date" id="input-tanggal" required class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Jenis Bahan</label>
+                        <select id="input-bahan" onchange="calculatePrice()" class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                            <option value="Ktak">Ktak</option>
+                            <option value="Camel">Camel (+Rp 500/lembar)</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1">Total Cetak (Lbr)</label>
+                            <input type="number" id="input-total-cetak" min="1" value="1" oninput="calculatePrice()" required class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1">Jml Cutting (Lbr)</label>
+                            <input type="number" id="input-jml-cutting" min="0" value="0" oninput="calculatePrice()" required class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Diskon / Potongan (Rp)</label>
+                        <input type="number" id="input-diskon" min="0" value="0" oninput="calculatePrice()" placeholder="Contoh: 5000" class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+
+                    <!-- Detail Perhitungan Harga -->
+                    <div class="bg-slate-50 p-3 rounded border text-xs space-y-1">
+                        <div class="flex justify-between text-slate-600">
+                            <span>Keterangan Tarif:</span>
+                            <span id="price-hint-cutting" class="font-medium">Cutting: Rp 8.000</span>
+                        </div>
+                        <div class="flex justify-between text-slate-600">
+                            <span></span>
+                            <span id="price-hint-non-cutting" class="font-medium">Non-Cut: Rp 7.000</span>
+                        </div>
+                        <div id="subtotal-info" class="text-slate-500 text-[11px] pt-1 border-t mt-1">
+                            Subtotal: Rp 0
+                        </div>
+                        <div class="flex justify-between font-bold text-indigo-700 text-sm pt-1">
+                            <span>Total Tagihan:</span>
+                            <span id="total-price-display">Rp 0</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Status Pembayaran</label>
+                        <select id="input-status" class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                            <option value="Belum Lunas">Belum Lunas</option>
+                            <option value="Lunas">Lunas</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Catatan Khusus</label>
+                        <textarea id="input-catatan" rows="2" placeholder="Catatan ukuran, nama pelanggan, dll..." class="w-full text-xs p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
+                    </div>
+
+                    <button type="submit" id="btn-submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs py-2.5 rounded shadow transition mt-2 flex justify-center items-center gap-2">
+                        <i class="fa-solid fa-plus-circle"></i> Simpan Pesanan
+                    </button>
+                </form>
+            </div>
+
+            <!-- Tabel Rekap Pesanan -->
+            <div class="lg:col-span-2 bg-white p-5 rounded-lg shadow">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-indigo-600"></i> Daftar Pesanan
+                    </h2>
+                    <button onclick="exportCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1 shadow transition">
+                        <i class="fa-solid fa-file-excel"></i> Export Excel/CSV
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100 text-slate-600 border-b">
+                                <th class="p-2.5">Tanggal</th>
+                                <th class="p-2.5">Bahan & Rincian</th>
+                                <th class="p-2.5">Perhitungan Harga</th>
+                                <th class="p-2.5">Total Akhir</th>
+                                <th class="p-2.5">Status</th>
+                                <th class="p-2.5 text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="order-table-body" class="divide-y divide-slate-100">
+                            <tr>
+                                <td colspan="6" class="text-center p-4 text-slate-400">Memuat data...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Konfigurasi Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyDemoConfigKeyForTesting12345",
+            authDomain: "rekap-cetak-demo.firebaseapp.com",
+            projectId: "rekap-cetak-demo",
+            storageBucket: "rekap-cetak-demo.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef123456"
+        };
+
+        // Inisialisasi Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let orders = [];
+
+        // Set default tanggal hari ini
+        document.getElementById('input-tanggal').valueAsDate = new Date();
+
+        // Autentikasi Anonim Firebase
+        auth.signInAnonymously().catch(err => {
+            console.warn("Firebase Auth Error, fallback ke offline mode:", err);
+            document.getElementById('sync-status').innerHTML = '<i class="fa-solid fa-wifi"></i> Lokal Mode';
+        });
+
+        // Hitung Otomatis Harga saat diketik/diubah
+        function calculatePrice() {
+            const bahan = document.getElementById('input-bahan').value;
+            const totalCetak = parseInt(document.getElementById('input-total-cetak').value) || 0;
+            let jmlCutting = parseInt(document.getElementById('input-jml-cutting').value) || 0;
+            const diskon = parseInt(document.getElementById('input-diskon').value) || 0;
+
+            // Validasi agar jumlah cutting tidak melebihi total cetak
+            if (jmlCutting > totalCetak) {
+                jmlCutting = totalCetak;
+                document.getElementById('input-jml-cutting').value = totalCetak;
+            }
+
+            // Tarif Dasar (Ktak vs Camel)
+            const extraCamel = (bahan === 'Camel') ? 500 : 0;
+            const rateCutting = 8000 + extraCamel;
+            const rateNonCutting = 7000 + extraCamel;
+
+            // Update Label Petunjuk
+            document.getElementById('price-hint-cutting').innerText = `Cutting: Rp ${rateCutting.toLocaleString('id-ID')}`;
+            document.getElementById('price-hint-non-cutting').innerText = `Non-Cut: Rp ${rateNonCutting.toLocaleString('id-ID')}`;
+
+            const jmlNonCutting = totalCetak - jmlCutting;
+            const subtotal = (jmlCutting * rateCutting) + (jmlNonCutting * rateNonCutting);
+            const totalHarga = Math.max(0, subtotal - diskon);
+
+            document.getElementById('subtotal-info').innerText = `Subtotal: Rp ${subtotal.toLocaleString('id-ID')}` + (diskon > 0 ? ` (Diskon: Rp ${diskon.toLocaleString('id-ID')})` : '');
+            document.getElementById('total-price-display').innerText = 'Rp ' + totalHarga.toLocaleString('id-ID');
+
+            return { totalCetak, jmlCutting, jmlNonCutting, rateCutting, rateNonCutting, subtotal, diskon, totalHarga };
+        }
+
+        // Firebase Realtime Listener
+        db.collection('pesanan_percetakan').orderBy('tanggal', 'desc').onSnapshot(snapshot => {
+            orders = [];
+            snapshot.forEach(doc => {
+                orders.push({ id: doc.id, ...doc.data() });
+            });
+            renderApp();
+            document.getElementById('sync-status').className = 'text-xs bg-emerald-800 px-3 py-1 rounded-full text-emerald-200 flex items-center gap-1';
+            document.getElementById('sync-status').innerHTML = '<i class="fa-solid fa-circle text-[8px] text-emerald-400"></i> Terhubung';
+        }, err => {
+            console.error("Firestore Error:", err);
+            document.getElementById('sync-status').className = 'text-xs bg-amber-800 px-3 py-1 rounded-full text-amber-200 flex items-center gap-1';
+            document.getElementById('sync-status').innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Terhubung Lokal';
+        });
+
+        // Render Data ke Tabel & Statistik
+        function renderApp() {
+            const tbody = document.getElementById('order-table-body');
+            tbody.innerHTML = '';
+
+            let totalLunas = 0;
+            let totalBelumLunas = 0;
+
+            if (orders.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-slate-400">Belum ada pesanan direkap.</td></tr>';
+            }
+
+            orders.forEach((order) => {
+                const total = Number(order.totalHarga || 0);
+                if (order.status === 'Lunas') {
+                    totalLunas += total;
+                } else {
+                    totalBelumLunas += total;
+                }
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition";
+                tr.innerHTML = `
+                    <td class="p-2.5 whitespace-nowrap font-medium">${order.tanggal}</td>
+                    <td class="p-2.5">
+                        <div class="font-bold text-slate-800">${order.bahan}</div>
+                        <div class="text-[11px] text-slate-500">${order.totalCetak} lbr (${order.jmlCutting} Cut / ${order.totalCetak - order.jmlCutting} Non-Cut)</div>
+                        ${order.catatan ? `<div class="text-[10px] text-indigo-600 italic mt-0.5">Note: ${order.catatan}</div>` : ''}
+                    </td>
+                    <td class="p-2.5 text-slate-600 text-[11px]">
+                        <div>Sub: Rp ${(order.subtotal || total).toLocaleString('id-ID')}</div>
+                        ${order.diskon > 0 ? `<div class="text-red-500 font-medium">Disc: -Rp ${Number(order.diskon).toLocaleString('id-ID')}</div>` : ''}
+                    </td>
+                    <td class="p-2.5 font-bold text-indigo-700">Rp ${total.toLocaleString('id-ID')}</td>
+                    <td class="p-2.5">
+                        <select onchange="updateStatus('${order.id}', this.value)" class="text-[11px] p-1 rounded border outline-none font-semibold ${order.status === 'Lunas' ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-amber-50 text-amber-700 border-amber-300'}">
+                            <option value="Belum Lunas" ${order.status === 'Belum Lunas' ? 'selected' : ''}>Belum Lunas</option>
+                            <option value="Lunas" ${order.status === 'Lunas' ? 'selected' : ''}>Lunas</option>
+                        </select>
+                    </td>
+                    <td class="p-2.5 text-center">
+                        <button onclick="deleteOrder('${order.id}')" class="text-red-500 hover:text-red-700 p-1">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('stat-total-order').innerText = orders.length;
+            document.getElementById('stat-lunas').innerText = 'Rp ' + totalLunas.toLocaleString('id-ID');
+            document.getElementById('stat-belum-lunas').innerText = 'Rp ' + totalBelumLunas.toLocaleString('id-ID');
+        }
+
+        // Tambah Data Baru
+        document.getElementById('order-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const calc = calculatePrice();
+            const btn = document.getElementById('btn-submit');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
+
+            const newOrder = {
+                tanggal: document.getElementById('input-tanggal').value,
+                bahan: document.getElementById('input-bahan').value,
+                totalCetak: calc.totalCetak,
+                jmlCutting: calc.jmlCutting,
+                subtotal: calc.subtotal,
+                diskon: calc.diskon,
+                totalHarga: calc.totalHarga,
+                status: document.getElementById('input-status').value,
+                catatan: document.getElementById('input-catatan').value,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            db.collection('pesanan_percetakan').add(newOrder).then(() => {
+                this.reset();
+                document.getElementById('input-tanggal').valueAsDate = new Date();
+                calculatePrice();
+            }).catch(err => {
+                alert("Gagal menyimpan ke cloud: " + err.message);
+            }).finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-plus-circle"></i> Simpan Pesanan';
+            });
+        });
+
+        // Update Status Pembayaran
+        function updateStatus(id, newStatus) {
+            db.collection('pesanan_percetakan').doc(id).update({ status: newStatus });
+        }
+
+        // Hapus Data
+        function deleteOrder(id) {
+            if(confirm('Apakah Anda yakin ingin menghapus pesanan ini?')) {
+                db.collection('pesanan_percetakan').doc(id).delete();
+            }
+        }
+
+        // Export ke CSV
+        function exportCSV() {
+            let csv = 'Tanggal,Bahan,Total Cetak,Jml Cutting,Subtotal,Diskon,Total Tagihan,Status,Catatan\n';
+            orders.forEach(o => {
+                csv += `"${o.tanggal}","${o.bahan}",${o.totalCetak},${o.jmlCutting},${o.subtotal || o.totalHarga},${o.diskon || 0},${o.totalHarga},"${o.status}","${o.catatan || ''}"\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `Rekap_Pesanan_${new Date().toISOString().slice(0,10)}.csv`);
+            a.click();
+        }
+
+        // Hitung harga awal saat halaman dimuat
+        calculatePrice();
+    </script>
+</body>
+</html>
